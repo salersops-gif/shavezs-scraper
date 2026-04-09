@@ -1,0 +1,102 @@
+name: 🤖 LeadEngine — Scrape, Crawl & Enrich
+
+on:
+  repository_dispatch:
+    types: [scrape-job]
+
+# Cancel any in-progress run for the same job (prevents duplicates)
+concurrency:
+  group: scrape-${{ github.event.client_payload.jobId }}
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    name: Run Scraping Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      # Job metadata — passed from the Next.js API via repository_dispatch
+      JOB_ID:      ${{ github.event.client_payload.jobId }}
+      NICHE:       ${{ github.event.client_payload.niche }}
+      LOCATION:    ${{ github.event.client_payload.location }}
+      QUERY:       ${{ github.event.client_payload.query }}
+      MAX_RESULTS: ${{ github.event.client_payload.maxResults }}
+
+      # Supabase — loaded from GitHub Secrets
+      SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      # Enrichment APIs — from GitHub Secrets
+      BOUNCIFY_API_KEY:   ${{ secrets.BOUNCIFY_API_KEY }}
+      APOLLO_API_KEY:     ${{ secrets.APOLLO_API_KEY }}
+      CONTACTOUT_API_KEY: ${{ secrets.CONTACTOUT_API_KEY }}
+      HUNTER_API_KEY:     ${{ secrets.HUNTER_API_KEY }}
+
+    steps:
+      # ── Setup ────────────────────────────────────────────────────────────
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      # Install Chromium for Playwright (faster than installing all browsers)
+      - name: 🌐 Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      # ── Validate job payload ──────────────────────────────────────────────
+      - name: 🔍 Validate job payload
+        run: |
+          echo "=== LeadEngine Pipeline Starting ==="
+          echo "Job ID:       $JOB_ID"
+          echo "Niche:        $NICHE"
+          echo "Location:     $LOCATION"
+          echo "Query:        $QUERY"
+          echo "Max Results:  $MAX_RESULTS"
+          echo "======================================"
+          if [ -z "$JOB_ID" ]; then
+            echo "❌ ERROR: JOB_ID is empty. Aborting."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "❌ ERROR: Supabase secrets are not configured."
+            exit 1
+          fi
+
+      # ── Step 1: Google Maps Scraper ───────────────────────────────────────
+      - name: 🗺️ Step 1 — Scrape Google Maps
+        run: node scripts/scraper.js
+        timeout-minutes: 25
+
+      # ── Step 2: Website Crawler & Tech Detector ───────────────────────────
+      - name: 🔍 Step 2 — Crawl websites & detect tech
+        run: node scripts/crawler.js
+        timeout-minutes: 20
+
+      # ── Step 3: Enrichment Waterfall ──────────────────────────────────────
+      - name: 💧 Step 3 — Run enrichment waterfall
+        run: node scripts/enrich.js
+        timeout-minutes: 15
+
+      # ── On failure: update DB so dashboard shows error ────────────────────
+      - name: ❌ Mark job failed on pipeline error
+        if: failure()
+        env:
+          FAILURE_STEP: ${{ github.job }}
+        run: |
+          node -e "
+            import('@supabase/supabase-js').then(({ createClient }) => {
+              const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+              sb.from('scrape_jobs')
+                .update({ status: 'FAILED', error_message: 'GitHub Actions step failed: ' + process.env.FAILURE_STEP })
+                .eq('id', process.env.JOB_ID)
+                .then(() => console.log('Job marked as FAILED'));
+            });
+          "
