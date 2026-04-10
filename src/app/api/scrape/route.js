@@ -31,6 +31,9 @@ export async function POST(request) {
 
   try {
     // 1. Create ScrapeJob record in DB — status starts as PENDING
+    // Note: userId is omitted here because Supabase auth users live in
+    // auth.users (managed by Supabase), not the public.users table that
+    // Prisma manages. Linking them requires a manual trigger in Supabase.
     const job = await prisma.scrapeJob.create({
       data: {
         query,
@@ -38,7 +41,7 @@ export async function POST(request) {
         location:   location.trim(),
         maxResults: parseInt(maxResults, 10),
         status:     'PENDING',
-        userId:     user.id,
+        // userId omitted — no row in public.users yet (auth user is in auth.users)
       },
     })
 

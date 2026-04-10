@@ -31,13 +31,12 @@ enum SourceType {
   MANUAL
 }
 
-// JobStatus aligns with GitHub Actions lifecycle
 enum JobStatus {
-  PENDING    // Created in DB, dispatch not yet sent
-  RUNNING    // GitHub Actions runner picked it up
-  COMPLETED  // All leads processed successfully
-  FAILED     // Action errored out
-  CANCELLED  // Manually cancelled
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
 enum LogLevel {
@@ -48,21 +47,15 @@ enum LogLevel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// User
-// Mirrors Supabase auth.users. This table lives in the public
-// schema. The UUID must match auth.users.id — the FK is added
-// manually in Supabase via:
-//   ALTER TABLE public.users ADD CONSTRAINT fk_auth_user
-//   FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
+// User — mirrors Supabase auth.users (public schema copy)
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id        String      @id                // UUID from Supabase auth.users
-  email     String      @unique
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id         String      @id
+  email      String      @unique
+  created_at DateTime    @default(now()) @map("created_at")
+  updated_at DateTime    @updatedAt      @map("updated_at")
 
-  // Relations
   scrapeJobs ScrapeJob[]
 
   @@map("users")
@@ -80,57 +73,48 @@ model User {
 //   +10  Has website
 //   + 5  Source is Google Maps (higher trust)
 //   + 5  Full street address available
-//   + 5  hasEmail = true but not yet verified (crawler found it)
 //
 // Quality buckets:  COLD = 0–39 | WARM = 40–69 | HOT = 70–100
 // ─────────────────────────────────────────────────────────────
 
 model Lead {
-  id               String           @id @default(cuid())
-  companyName      String
-  website          String?
-  email            String?
-  phone            String?
+  id                String           @id @default(cuid())
+  company_name      String           @map("company_name")
+  website           String?
+  email             String?
+  phone             String?
 
-  // Location fields
-  location         String?          // Raw location string from scrape query
-  address          String?          // Full street address if available
-  city             String?
-  country          String?
+  location          String?
+  address           String?
+  city              String?
+  country           String?
 
-  // Industry / niche
-  industry         String?
-  keyword          String?          // Search keyword that found this lead
-  metaDescription  String?          // Page meta-description for scoring
+  industry          String?
+  keyword           String?
+  meta_description  String?          @map("meta_description")
 
-  // Tech stack detected on their website (e.g. ["Shopify","WhatsApp Business"])
-  techStack        String[]
+  tech_stack        String[]         @map("tech_stack")
 
-  // Scoring & Quality
-  // See scoring comments above for point breakdown
-  leadScore        Int              @default(0)
-  leadQuality      LeadQuality      @default(COLD)
-  enrichmentStatus EnrichmentStatus @default(PENDING)
+  lead_score        Int              @default(0)       @map("lead_score")
+  lead_quality      LeadQuality      @default(COLD)    @map("lead_quality")
+  enrichment_status EnrichmentStatus @default(PENDING) @map("enrichment_status")
 
-  // Presence flags — denormalised for fast dashboard queries
-  hasWhatsApp      Boolean          @default(false)
-  hasEmail         Boolean          @default(false)
-  hasPhone         Boolean          @default(false)
-  hasWebsite       Boolean          @default(false)
+  has_whats_app     Boolean          @default(false)   @map("has_whats_app")
+  has_email         Boolean          @default(false)   @map("has_email")
+  has_phone         Boolean          @default(false)   @map("has_phone")
+  has_website       Boolean          @default(false)   @map("has_website")
 
-  // Source tracking
-  sourceType       SourceType       @default(GOOGLE_MAPS)
-  sourceUrl        String?          // Original Google Maps / directory URL
+  source_type       SourceType       @default(GOOGLE_MAPS) @map("source_type")
+  source_url        String?          @map("source_url")
 
-  notes            String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  notes             String?
+  created_at        DateTime         @default(now()) @map("created_at")
+  updated_at        DateTime         @updatedAt      @map("updated_at")
 
-  // Relations
-  scrapeJobId      String?
-  scrapeJob        ScrapeJob?       @relation(fields: [scrapeJobId], references: [id])
-  enrichmentLogs   EnrichmentLog[]
-  techDetections   TechDetection[]
+  scrape_job_id     String?          @map("scrape_job_id")
+  scrapeJob         ScrapeJob?       @relation(fields: [scrape_job_id], references: [id])
+  enrichmentLogs    EnrichmentLog[]
+  techDetections    TechDetection[]
   emailVerification EmailVerification?
 
   @@map("leads")
@@ -138,39 +122,26 @@ model Lead {
 
 // ─────────────────────────────────────────────────────────────
 // ScrapeJob
-// One record per GitHub Actions trigger. The `query` field
-// stores the combined search string, e.g. "Auto Spares Karachi".
 // ─────────────────────────────────────────────────────────────
 
 model ScrapeJob {
   id            String     @id @default(cuid())
-
-  // The human-readable search query sent to GitHub Actions
-  // e.g. "Auto Spares Manufacturer Karachi"
   query         String
-
-  // Decomposed for filtering / analytics
-  niche         String     // e.g. "Auto Spares"
-  location      String     // e.g. "Karachi"
-  maxResults    Int        @default(50)
-
-  // Lifecycle — maps to GitHub Actions run states
+  niche         String
+  location      String
+  max_results   Int        @default(50)    @map("max_results")
   status        JobStatus  @default(PENDING)
-  progress      Int        @default(0)   // 0–100%
-  totalFound    Int        @default(0)
-  errorMessage  String?
+  progress      Int        @default(0)
+  total_found   Int        @default(0)     @map("total_found")
+  error_message String?    @map("error_message")
+  github_run_id String?    @map("github_run_id")
+  github_run_url String?   @map("github_run_url")
+  created_at    DateTime   @default(now()) @map("created_at")
+  updated_at    DateTime   @updatedAt      @map("updated_at")
+  completed_at  DateTime?  @map("completed_at")
 
-  // GitHub metadata
-  githubRunId   String?    // Returned by the dispatch response
-  githubRunUrl  String?    // Deep-link to the Actions run page
-
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  completedAt   DateTime?
-
-  // Relations
-  userId        String?
-  user          User?      @relation(fields: [userId], references: [id])
+  user_id       String?    @map("user_id")
+  user          User?      @relation(fields: [user_id], references: [id])
   leads         Lead[]
   logs          JobLog[]
 
@@ -178,78 +149,72 @@ model ScrapeJob {
 }
 
 // ─────────────────────────────────────────────────────────────
-// JobLog  (powers the real-time Terminal Stream)
-// Rows are inserted by the GitHub Actions runner as it works.
-// Supabase Realtime broadcasts each INSERT to the dashboard.
+// JobLog — powers the real-time Terminal Stream
 // ─────────────────────────────────────────────────────────────
 
 model JobLog {
-  id        String     @id @default(cuid())
-  jobId     String
-  level     LogLevel   @default(INFO)
-  message   String
-  createdAt DateTime   @default(now())
+  id         String     @id @default(cuid())
+  job_id     String     @map("job_id")
+  level      LogLevel   @default(INFO)
+  message    String
+  created_at DateTime   @default(now()) @map("created_at")
 
-  // Relations
-  job       ScrapeJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job        ScrapeJob  @relation(fields: [job_id], references: [id], onDelete: Cascade)
 
   @@map("job_logs")
 }
 
 // ─────────────────────────────────────────────────────────────
-// EnrichmentLog — audit trail per lead per enrichment step
+// EnrichmentLog
 // ─────────────────────────────────────────────────────────────
 
 model EnrichmentLog {
-  id        String   @id @default(cuid())
-  leadId    String
-  // Step: "CRAWL" | "BOUNCIFY" | "APOLLO" | "CONTACTOUT" | "HUNTER"
-  step      String
-  // Outcome: "SUCCESS" | "FAILED" | "SKIPPED" | "RATE_LIMITED"
-  status    String
-  message   String?
-  data      Json?
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  lead_id    String   @map("lead_id")
+  step       String
+  status     String
+  message    String?
+  data       Json?
+  created_at DateTime @default(now()) @map("created_at")
 
-  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
 
   @@map("enrichment_logs")
 }
 
 // ─────────────────────────────────────────────────────────────
-// TechDetection — one row per technology found per lead
+// TechDetection
 // ─────────────────────────────────────────────────────────────
 
 model TechDetection {
   id         String   @id @default(cuid())
-  leadId     String
-  // e.g. "Shopify" | "WordPress" | "WhatsApp Business" | "WooCommerce"
+  lead_id    String   @map("lead_id")
   technology String
-  confidence String   @default("HIGH")  // "HIGH" | "MEDIUM" | "LOW"
-  evidence   String?  // Exact pattern that matched
-  createdAt  DateTime @default(now())
+  confidence String   @default("HIGH")
+  evidence   String?
+  created_at DateTime @default(now()) @map("created_at")
 
-  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
 
   @@map("tech_detections")
 }
 
 // ─────────────────────────────────────────────────────────────
-// EmailVerification — result from Bouncify (primary) or fallback
+// EmailVerification — Bouncify result (primary verifier)
 // ─────────────────────────────────────────────────────────────
 
 model EmailVerification {
-  id           String   @id @default(cuid())
-  leadId       String   @unique
-  email        String
-  isValid      Boolean?
-  // Bouncify statuses: "deliverable" | "undeliverable" | "risky" | "unknown"
-  status       String?
-  // Provider used: "bouncify" | "myemailverifier"
-  provider     String?
-  verifiedAt   DateTime @default(now())
+  id          String   @id @default(cuid())
+  lead_id     String   @unique @map("lead_id")
+  email       String
+  is_valid    Boolean? @map("is_valid")
+  // Bouncify: "deliverable" | "undeliverable" | "risky" | "unknown"
+  status      String?
+  // Provider: "bouncify" | "myemailverifier"
+  provider    String?
+  verified_at DateTime @default(now()) @map("verified_at")
 
-  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead        Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
 
   @@map("email_verifications")
 }

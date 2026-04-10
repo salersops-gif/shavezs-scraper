@@ -3,26 +3,31 @@
 import { useState } from 'react'
 import { Search, MapPin, Hash, Zap } from 'lucide-react'
 
+// Quick-fill examples — user can also type anything freely
 const KEYWORD_PRESETS = [
   'Auto Spares Manufacturer',
-  'Automotive Casting',
-  'OEM Parts Wholesaler',
-  'Spare Parts Exporter',
-  'Chassis Factory',
-  'Engine Parts Supplier',
+  'Software Development Company',
+  'Restaurant',
+  'Real Estate Agency',
+  'Clothing Manufacturer',
+  'Electronics Supplier',
+  'Construction Company',
+  'Law Firm',
 ]
 
 const LOCATION_PRESETS = [
-  'South Africa',
-  'India',
-  'China',
-  'UAE',
-  'Germany',
-  'United States',
+  'New York, USA',
+  'London, UK',
+  'Dubai, UAE',
+  'Karachi, Pakistan',
+  'Mumbai, India',
+  'Sydney, Australia',
+  'Toronto, Canada',
+  'Singapore',
 ]
 
 export default function NewCampaignForm({ onJobStarted }) {
-  const [keyword, setKeyword] = useState('')
+  const [niche, setNiche] = useState('')
   const [location, setLocation] = useState('')
   const [maxResults, setMaxResults] = useState(30)
   const [loading, setLoading] = useState(false)
@@ -30,8 +35,8 @@ export default function NewCampaignForm({ onJobStarted }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!keyword.trim() || !location.trim()) {
-      setError('Keyword and location are required')
+    if (!niche.trim() || !location.trim()) {
+      setError('Business type and location are required')
       return
     }
     setLoading(true)
@@ -41,7 +46,7 @@ export default function NewCampaignForm({ onJobStarted }) {
       const res = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: keyword.trim(), location: location.trim(), maxResults }),
+        body: JSON.stringify({ niche: niche.trim(), location: location.trim(), maxResults }),
       })
 
       const data = await res.json()
@@ -52,7 +57,7 @@ export default function NewCampaignForm({ onJobStarted }) {
       }
 
       onJobStarted?.(data.job)
-      setKeyword('')
+      setNiche('')
       setLocation('')
     } catch (err) {
       setError('Network error — please try again')
@@ -63,35 +68,35 @@ export default function NewCampaignForm({ onJobStarted }) {
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* Keyword */}
+      {/* Niche / Business Type */}
       <div>
-        <label className="input-label">Search Keyword</label>
+        <label className="input-label">Business Type <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(type anything)</span></label>
         <div style={{ position: 'relative' }}>
           <Search style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', width: '14px', height: '14px', color: 'var(--text-muted)' }} />
           <input
             className="input"
             style={{ paddingLeft: '34px' }}
-            placeholder="e.g. auto spares manufacturer"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="e.g. Software Company, Restaurant, Law Firm..."
+            value={niche}
+            onChange={(e) => setNiche(e.target.value)}
             list="keyword-presets"
           />
         </div>
         <datalist id="keyword-presets">
           {KEYWORD_PRESETS.map((k) => <option key={k} value={k} />)}
         </datalist>
-        {/* Quick presets */}
+        {/* Quick-fill chips */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
-          {KEYWORD_PRESETS.slice(0, 3).map((k) => (
+          {KEYWORD_PRESETS.slice(0, 4).map((k) => (
             <button
               key={k}
               type="button"
-              onClick={() => setKeyword(k)}
+              onClick={() => setNiche(k)}
               style={{
                 fontSize: '10px', padding: '3px 8px', borderRadius: '99px', cursor: 'pointer',
-                background: keyword === k ? 'rgba(79,142,247,0.2)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${keyword === k ? 'rgba(79,142,247,0.4)' : 'var(--border)'}`,
-                color: keyword === k ? 'var(--accent-blue)' : 'var(--text-muted)',
+                background: niche === k ? 'rgba(79,142,247,0.2)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${niche === k ? 'rgba(79,142,247,0.4)' : 'var(--border)'}`,
+                color: niche === k ? 'var(--accent-blue)' : 'var(--text-muted)',
                 transition: 'all 0.15s',
               }}
             >

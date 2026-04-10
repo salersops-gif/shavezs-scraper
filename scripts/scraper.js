@@ -1,54 +1,39 @@
 /**
- * scripts/scraper.js  —  Step 1 of the LeadEngine pipeline
+ * scripts/scraper.js  —  Step 1: Google Maps Scraper
  *
- * Scrapes Google Maps for businesses matching the provided niche + location.
- * Uses playwright-extra with the stealth plugin to avoid bot detection.
+ * Uses a more reliable selector strategy for 2024/2025 Google Maps DOM:
+ *   1. Search via URL navigation
+ *   2. Collect all place URLs from .Nv2PK cards
+ *   3. Visit each place URL individually to extract full details
  *
- * For every result found it:
- *   1. Creates a Lead record in Supabase (enrichmentStatus = PENDING)
- *   2. Streams a log line to job_logs (powers the live dashboard terminal)
- *   3. Updates the ScrapeJob progress %
- *
- * ENV vars (all injected by the GitHub Actions workflow):
- *   JOB_ID, NICHE, LOCATION, QUERY, MAX_RESULTS,
- *   SUPABASE_URL, SUPABASE_SERVICE_KEY
+ * This avoids the fragile "click + back" pattern which Google often blocks.
  */
 
 import { supabase }        from './lib/supabase-client.js'
 import { logger, logSync } from './lib/logger.js'
 
-// ─── Config ────────────────────────────────────────────────────────────────
 const JOB_ID      = process.env.JOB_ID
-const NICHE       = process.env.NICHE       || 'Auto Spares Manufacturer'
+const NICHE       = process.env.NICHE       || 'Restaurants'
 const LOCATION    = process.env.LOCATION    || 'Karachi'
 const QUERY       = process.env.QUERY       || `${NICHE} ${LOCATION}`
-const MAX_RESULTS = parseInt(process.env.MAX_RESULTS || '50', 10)
+const MAX_RESULTS = parseInt(process.env.MAX_RESULTS || '20', 10)
 
-if (!JOB_ID) {
-  console.error('❌ JOB_ID env var is required')
-  process.exit(1)
-}
+if (!JOB_ID) { console.error('❌ JOB_ID required'); process.exit(1) }
 
-// ─── Stealth Browser Factory ────────────────────────────────────────────────
+// ─── Browser factory with stealth fallback ──────────────────────────────────
 async function launchBrowser() {
   try {
-    // playwright-extra + stealth for anti-bot evasion
-    const { chromium: chromiumExtra } = await import('playwright-extra')
-    const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default
-    chromiumExtra.use(StealthPlugin())
+    const { chromium: extra } = await import('playwright-extra')
+    const stealth = (await import('puppeteer-extra-plugin-stealth')).default
+    extra.use(stealth())
     logger.info('🥷 Stealth plugin active')
-    return chromiumExtra.launch({
+    return extra.launch({
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--lang=en-US,en',
-      ],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+             '--disable-blink-features=AutomationControlled'],
     })
   } catch {
-    logger.warn('playwright-extra not available — falling back to standard Chromium')
+    logger.warn('Stealth not available — using standard Chromium')
     const { chromium } = await import('playwright')
     return chromium.launch({
       headless: true,
@@ -57,269 +42,220 @@ async function launchBrowser() {
   }
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
-/** Mark the job as RUNNING and log start */
-async function jobStart() {
-  await supabase
-    .from('scrape_jobs')
-    .update({ status: 'RUNNING', progress: 0 })
-    .eq('id', JOB_ID)
-
-  await logSync(`🚀 Scrape job started — Query: "${QUERY}" | Max: ${MAX_RESULTS}`, 'INFO')
+// ─── Job lifecycle helpers ───────────────────────────────────────────────────
+async function markRunning() {
+  await supabase.from('scrape_jobs').update({ status: 'RUNNING', progress: 0 }).eq('id', JOB_ID)
+  await logSync(`🚀 Scrape started — "${QUERY}" | Max: ${MAX_RESULTS}`)
 }
 
-/** Update job progress % and total_found count */
-async function jobProgress(progress, totalFound) {
-  await supabase
-    .from('scrape_jobs')
-    .update({ progress, total_found: totalFound })
-    .eq('id', JOB_ID)
+async function setProgress(pct, found) {
+  await supabase.from('scrape_jobs').update({ progress: pct, total_found: found }).eq('id', JOB_ID)
 }
 
-/** Extract useful fields from a Google Maps result card */
-async function extractResult(card) {
-  try {
-    const companyName = await card.$eval(
-      '.fontHeadlineSmall, [jstcache] span.fontHeadlineSmall, .qBF1Pd',
-      (el) => el.innerText.trim()
-    ).catch(() => null)
-
-    if (!companyName) return null
-
-    const address = await card.$eval(
-      '.W4Efsd .W4Efsd span',
-      (el) => el.innerText.trim()
-    ).catch(() => null)
-
-    const phone = await card.$eval(
-      '[data-tooltip="Copy phone number"], [aria-label*="phone"]',
-      (el) => el.getAttribute('aria-label') || el.innerText
-    ).catch(() => null)
-
-    const mapsLink = await card.$eval(
-      'a[href*="/maps/place/"]',
-      (el) => el.href
-    ).catch(() => null)
-
-    // Try to get website — shown as a secondary line on some cards
-    const website = await card.$eval(
-      'a[data-value="Website"], [aria-label="Website"]',
-      (el) => el.href
-    ).catch(() => null)
-
-    return { companyName, address, phone, website, sourceUrl: mapsLink }
-  } catch {
-    return null
-  }
-}
-
-// ─── Detail Page Scrape ─────────────────────────────────────────────────────
-/** Click into a result card and extract full details from the detail panel */
-async function scrapeDetail(page, card) {
-  try {
-    await card.click()
-    // Wait for the detail panel to load
-    await page.waitForSelector('[data-section-id="ap"]', { timeout: 8000 }).catch(() => null)
-    await page.waitForTimeout(1500)
-
-    const companyName = await page.$eval(
-      'h1.DUwDvf, h1[class*="fontHeadlineLarge"]',
-      (el) => el.innerText.trim()
-    ).catch(() => null)
-
-    if (!companyName) return null
-
-    const websiteBtn = await page.$('a[data-item-id="authority"]')
-    const website = websiteBtn
-      ? await websiteBtn.getAttribute('href')
-      : null
-
-    const phone = await page.$eval(
-      '[data-tooltip="Copy phone number"]',
-      (el) => el.getAttribute('aria-label')?.replace('Phone:', '').trim() || el.innerText.trim()
-    ).catch(() => null)
-
-    const address = await page.$eval(
-      'button[data-item-id="address"] .fontBodyMedium',
-      (el) => el.innerText.trim()
-    ).catch(() => null)
-
-    const sourceUrl = page.url()
-
-    return { companyName, website, phone, address, sourceUrl }
-  } catch {
-    return null
-  }
-}
-
-// ─── Insert Lead to Supabase ────────────────────────────────────────────────
+// ─── Insert one lead (skip duplicates) ─────────────────────────────────────
 async function insertLead(data) {
   const { data: existing } = await supabase
     .from('leads')
     .select('id')
-    .eq('company_name', data.companyName)
+    .eq('company_name', data.company_name)
     .eq('scrape_job_id', JOB_ID)
     .limit(1)
 
-  if (existing?.length) return existing[0] // Skip duplicate
-
-  const payload = {
-    company_name:      data.companyName,
-    website:           data.website    || null,
-    phone:             data.phone      || null,
-    address:           data.address    || null,
-    location:          LOCATION,
-    keyword:           NICHE,
-    source_type:       'GOOGLE_MAPS',
-    source_url:        data.sourceUrl  || null,
-    scrape_job_id:     JOB_ID,
-    enrichment_status: 'PENDING',
-    lead_score:        0,
-    lead_quality:      'COLD',
-    has_website:       Boolean(data.website),
-    has_phone:         Boolean(data.phone),
-    tech_stack:        [],
-  }
+  if (existing?.length) return existing[0]
 
   const { data: inserted, error } = await supabase
     .from('leads')
-    .insert(payload)
+    .insert({
+      company_name:      data.company_name,
+      website:           data.website    || null,
+      phone:             data.phone      || null,
+      address:           data.address    || null,
+      location:          LOCATION,
+      keyword:           NICHE,
+      source_type:       'GOOGLE_MAPS',
+      source_url:        data.source_url || null,
+      scrape_job_id:     JOB_ID,
+      enrichment_status: 'PENDING',
+      lead_score:        data.website ? 10 : 0, // +10 for having a website
+      lead_quality:      'COLD',
+      has_website:       Boolean(data.website),
+      has_phone:         Boolean(data.phone),
+      tech_stack:        [],
+    })
     .select('id')
     .single()
 
-  if (error) {
-    logger.error(`DB insert failed for "${data.companyName}": ${error.message}`)
-    return null
-  }
-
+  if (error) logger.error(`Insert failed for "${data.company_name}": ${error.message}`)
   return inserted
 }
 
-// ─── Main Scrape Loop ───────────────────────────────────────────────────────
+// ─── Extract details from a Google Maps place page ─────────────────────────
+async function extractPlaceDetails(page, url) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 })
+
+    // Wait for the company name — signals the page has loaded
+    await page.waitForSelector('h1', { timeout: 10000 })
+
+    const company_name = await page.$eval(
+      'h1.DUwDvf, h1[class*="fontHeadlineLarge"], h1',
+      el => el.innerText.trim()
+    ).catch(() => null)
+
+    if (!company_name) return null
+
+    const website = await page.$eval(
+      'a[data-item-id="authority"]',
+      el => el.href
+    ).catch(() => null)
+
+    const phone = await page.evaluate(() => {
+      // Try multiple selectors for phone
+      const btn = document.querySelector(
+        '[data-tooltip="Copy phone number"], button[aria-label*="Phone"], [data-item-id^="phone:"]'
+      )
+      if (!btn) return null
+      const label = btn.getAttribute('aria-label') || btn.innerText || ''
+      return label.replace(/Phone:\s*/i, '').replace(/^phone:/i, '').trim() || null
+    })
+
+    const address = await page.$eval(
+      'button[data-item-id="address"] .fontBodyMedium, [data-item-id="address"] span',
+      el => el.innerText.trim()
+    ).catch(() => null)
+
+    return { company_name, website, phone, address, source_url: url }
+  } catch (err) {
+    logger.warn(`Failed to extract ${url}: ${err.message}`)
+    return null
+  }
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
 async function main() {
-  await jobStart()
+  await markRunning()
 
   const browser = await launchBrowser()
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     locale:    'en-US',
-    viewport:  { width: 1280, height: 800 },
-  })
-  const page = await context.newPage()
-
-  // Block images, fonts, and media to speed up scraping
-  await page.route('**/*', (route) => {
-    const type = route.request().resourceType()
-    if (['image', 'font', 'media', 'stylesheet'].includes(type)) {
-      route.abort()
-    } else {
-      route.continue()
-    }
+    viewport:  { width: 1280, height: 900 },
   })
 
-  const leads       = []
-  let   scrollTries = 0
+  // Speed up: block images, fonts, media
+  const listPage = await context.newPage()
+  await listPage.route('**/*', route => {
+    if (['image', 'media', 'font'].includes(route.request().resourceType())) route.abort()
+    else route.continue()
+  })
+
+  let placeUrls = []
 
   try {
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(QUERY)}`
-    logger.info(`📍 Navigating to Google Maps: ${searchUrl}`)
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    logger.info(`📍 Opening: ${searchUrl}`)
+    await listPage.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
-    // Accept cookie consent if it appears
-    await page.click('button[aria-label*="Accept"], button[jsname="b3VHJd"]')
-      .catch(() => null)
+    // Dismiss consent / cookie dialogs
+    for (const selector of [
+      'button[aria-label="Accept all"]',
+      'button[aria-label="Reject all"]',
+      'button:has-text("Accept all")',
+      'form[action*="consent"] button',
+    ]) {
+      await listPage.click(selector).catch(() => null)
+    }
+    await listPage.waitForTimeout(2000)
 
-    // Wait for the results feed
-    await page.waitForSelector('[role="feed"]', { timeout: 20000 }).catch(() => {
-      logger.warn('Results feed not found — Google Maps layout may have changed')
-    })
+    // Wait for the results list to appear
+    await listPage.waitForSelector(
+      '.Nv2PK, [role="feed"], div[aria-label*="Results"]',
+      { timeout: 20000 }
+    ).catch(() => logger.warn('Results feed not detected — will try anyway'))
 
-    logger.info(`🔍 Scanning results for "${QUERY}"...`)
+    // Scroll to load up to MAX_RESULTS cards
+    let scrollTries = 0
+    while (scrollTries < 20) {
+      await listPage.waitForTimeout(1500)
 
-    while (leads.length < MAX_RESULTS && scrollTries < 25) {
-      // Get all visible result cards
-      const cards = await page.$$('[role="feed"] > div[jsaction]')
+      // Collect all place links currently visible
+      const urls = await listPage.$$eval(
+        '.Nv2PK a[href*="/maps/place/"], [role="feed"] a[href*="/maps/place/"]',
+        els => [...new Set(els.map(el => el.href.split('?')[0] + '?hl=en'))]
+      )
 
-      for (const card of cards) {
-        if (leads.length >= MAX_RESULTS) break
+      placeUrls = [...new Set([...placeUrls, ...urls])]
+      logger.info(`Found ${placeUrls.length} place URLs so far...`)
 
-        // Quick extract from card (doesn't require click)
-        const quickData = await extractResult(card)
-        if (!quickData?.companyName) continue
+      if (placeUrls.length >= MAX_RESULTS) break
 
-        // Skip if already captured
-        if (leads.some((l) => l.companyName === quickData.companyName)) continue
-
-        // For detailed data (website, phone, address) click into the card
-        const detail = await scrapeDetail(page, card).catch(() => null)
-        const data   = detail || quickData
-
-        if (!data.companyName) continue
-
-        leads.push(data)
-        logger.info(`[${leads.length}/${MAX_RESULTS}] Found: ${data.companyName}`)
-
-        // Insert immediately so the dashboard shows leads appearing live
-        await insertLead(data)
-
-        // Update progress
-        const progress = Math.round((leads.length / MAX_RESULTS) * 50) // scraping = 0-50%
-        await jobProgress(progress, leads.length)
-
-        // Navigate back to results list
-        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => null)
-        await page.waitForSelector('[role="feed"]', { timeout: 8000 }).catch(() => null)
-        await page.waitForTimeout(800)
-      }
-
-      if (leads.length >= MAX_RESULTS) break
-
-      // Scroll the feed to load more results
-      const scrolled = await page.evaluate(() => {
-        const feed = document.querySelector('[role="feed"]')
+      // Scroll the feed panel
+      const scrolled = await listPage.evaluate(() => {
+        const feed = document.querySelector('[role="feed"]') || document.querySelector('.m6QErb')
         if (!feed) return false
-        feed.scrollTop += 2000
+        feed.scrollTop += 3000
         return true
       })
 
-      if (!scrolled) break
+      if (!scrolled) { scrollTries += 2; continue }
 
-      await page.waitForTimeout(2000)
+      // Check for "end of results"
+      const ended = await listPage.$('.HlvSq, [class*="noResultsMessage"]')
+      if (ended) { logger.info('Reached end of results'); break }
 
-      // Check for "end of list" message
-      const endMsg = await page.$('.HlvSq')
-      if (endMsg) {
-        logger.info("📋 Reached end of Google Maps results")
-        break
-      }
-
-      const newCards = await page.$$('[role="feed"] > div[jsaction]')
-      if (newCards.length <= leads.length + 2) {
-        scrollTries++
-      } else {
-        scrollTries = 0
-      }
+      scrollTries++
     }
 
-    logger.success(`✅ Scraping complete — ${leads.length} leads captured`)
-    await jobProgress(50, leads.length)
+    placeUrls = placeUrls.slice(0, MAX_RESULTS)
+    logger.info(`🗺️  Total: ${placeUrls.length} places to visit`)
   } catch (err) {
-    logger.error(`Fatal scraper error: ${err.message}`)
-    await supabase
-      .from('scrape_jobs')
-      .update({ status: 'FAILED', error_message: err.message })
-      .eq('id', JOB_ID)
-    process.exit(1)
+    logger.error(`Search page error: ${err.message}`)
   } finally {
-    await browser.close()
+    await listPage.close()
   }
+
+  if (!placeUrls.length) {
+    logger.warn('No place URLs found — Google Maps may have blocked the request or changed its layout')
+    await supabase.from('scrape_jobs').update({ status: 'COMPLETED', progress: 100, total_found: 0 }).eq('id', JOB_ID)
+    await browser.close()
+    return
+  }
+
+  // ── Visit each place URL and extract details ─────────────────────────────
+  const detailPage = await context.newPage()
+  await detailPage.route('**/*', route => {
+    if (['image', 'media', 'font'].includes(route.request().resourceType())) route.abort()
+    else route.continue()
+  })
+
+  let saved = 0
+
+  for (const [i, url] of placeUrls.entries()) {
+    logger.info(`[${i + 1}/${placeUrls.length}] Visiting: ${url}`)
+
+    const details = await extractPlaceDetails(detailPage, url)
+    if (!details) continue
+
+    logger.success(`Found: ${details.company_name}`)
+    await insertLead(details)
+    saved++
+
+    const pct = Math.round(((i + 1) / placeUrls.length) * 50)
+    await setProgress(pct, saved)
+
+    // Polite delay between requests
+    await detailPage.waitForTimeout(1200 + Math.random() * 800)
+  }
+
+  await detailPage.close()
+  await browser.close()
+
+  await logSync(`✅ Scraping complete — ${saved} leads saved`, 'SUCCESS')
+  await setProgress(50, saved)
 }
 
-main().catch(async (err) => {
-  console.error('Unhandled error in scraper:', err)
-  await supabase
-    .from('scrape_jobs')
-    .update({ status: 'FAILED', error_message: err.message })
-    .eq('id', JOB_ID)
+main().catch(async err => {
+  logger.error(`Fatal: ${err.message}`)
+  await supabase.from('scrape_jobs').update({ status: 'FAILED', error_message: err.message }).eq('id', JOB_ID)
   process.exit(1)
 })
