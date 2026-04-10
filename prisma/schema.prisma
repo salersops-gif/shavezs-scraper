@@ -47,14 +47,14 @@ enum LogLevel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// User — mirrors Supabase auth.users (public schema copy)
+// User — mirrors Supabase auth.users
 // ─────────────────────────────────────────────────────────────
 
 model User {
   id         String      @id
   email      String      @unique
-  created_at DateTime    @default(now()) @map("created_at")
-  updated_at DateTime    @updatedAt      @map("updated_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt      @map("updated_at")
 
   scrapeJobs ScrapeJob[]
 
@@ -63,58 +63,42 @@ model User {
 
 // ─────────────────────────────────────────────────────────────
 // Lead
-//
-// Lead Score Calculation (0–100 points):
-//   +20  Verified email (Bouncify status = "deliverable")
-//   +15  Phone number found
-//   +10  WhatsApp Business link detected on site
-//   +10  "Manufacturing", "OEM", "Export" found in meta description
-//   +10  Tech stack identified (Shopify, WordPress, etc.)
-//   +10  Has website
-//   + 5  Source is Google Maps (higher trust)
-//   + 5  Full street address available
-//
-// Quality buckets:  COLD = 0–39 | WARM = 40–69 | HOT = 70–100
+// Lead Score (0–100): +20 verified email, +15 phone, +10 whatsapp,
+//   +10 keywords, +10 tech stack, +10 website, +5 maps, +5 address
+// Quality: COLD 0–39 | WARM 40–69 | HOT 70–100
 // ─────────────────────────────────────────────────────────────
 
 model Lead {
-  id                String           @id @default(cuid())
-  company_name      String           @map("company_name")
-  website           String?
-  email             String?
-  phone             String?
+  id               String           @id @default(cuid())
+  companyName      String           @map("company_name")
+  website          String?
+  email            String?
+  phone            String?
+  location         String?
+  address          String?
+  city             String?
+  country          String?
+  industry         String?
+  keyword          String?
+  metaDescription  String?          @map("meta_description")
+  techStack        String[]         @map("tech_stack")
+  leadScore        Int              @default(0)       @map("lead_score")
+  leadQuality      LeadQuality      @default(COLD)    @map("lead_quality")
+  enrichmentStatus EnrichmentStatus @default(PENDING) @map("enrichment_status")
+  hasWhatsApp      Boolean          @default(false)   @map("has_whats_app")
+  hasEmail         Boolean          @default(false)   @map("has_email")
+  hasPhone         Boolean          @default(false)   @map("has_phone")
+  hasWebsite       Boolean          @default(false)   @map("has_website")
+  sourceType       SourceType       @default(GOOGLE_MAPS) @map("source_type")
+  sourceUrl        String?          @map("source_url")
+  notes            String?
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt      @map("updated_at")
 
-  location          String?
-  address           String?
-  city              String?
-  country           String?
-
-  industry          String?
-  keyword           String?
-  meta_description  String?          @map("meta_description")
-
-  tech_stack        String[]         @map("tech_stack")
-
-  lead_score        Int              @default(0)       @map("lead_score")
-  lead_quality      LeadQuality      @default(COLD)    @map("lead_quality")
-  enrichment_status EnrichmentStatus @default(PENDING) @map("enrichment_status")
-
-  has_whats_app     Boolean          @default(false)   @map("has_whats_app")
-  has_email         Boolean          @default(false)   @map("has_email")
-  has_phone         Boolean          @default(false)   @map("has_phone")
-  has_website       Boolean          @default(false)   @map("has_website")
-
-  source_type       SourceType       @default(GOOGLE_MAPS) @map("source_type")
-  source_url        String?          @map("source_url")
-
-  notes             String?
-  created_at        DateTime         @default(now()) @map("created_at")
-  updated_at        DateTime         @updatedAt      @map("updated_at")
-
-  scrape_job_id     String?          @map("scrape_job_id")
-  scrapeJob         ScrapeJob?       @relation(fields: [scrape_job_id], references: [id])
-  enrichmentLogs    EnrichmentLog[]
-  techDetections    TechDetection[]
+  scrapeJobId      String?          @map("scrape_job_id")
+  scrapeJob        ScrapeJob?       @relation(fields: [scrapeJobId], references: [id])
+  enrichmentLogs   EnrichmentLog[]
+  techDetections   TechDetection[]
   emailVerification EmailVerification?
 
   @@map("leads")
@@ -125,41 +109,41 @@ model Lead {
 // ─────────────────────────────────────────────────────────────
 
 model ScrapeJob {
-  id            String     @id @default(cuid())
-  query         String
-  niche         String
-  location      String
-  max_results   Int        @default(50)    @map("max_results")
-  status        JobStatus  @default(PENDING)
-  progress      Int        @default(0)
-  total_found   Int        @default(0)     @map("total_found")
-  error_message String?    @map("error_message")
-  github_run_id String?    @map("github_run_id")
-  github_run_url String?   @map("github_run_url")
-  created_at    DateTime   @default(now()) @map("created_at")
-  updated_at    DateTime   @updatedAt      @map("updated_at")
-  completed_at  DateTime?  @map("completed_at")
+  id           String     @id @default(cuid())
+  query        String
+  niche        String
+  location     String
+  maxResults   Int        @default(50)  @map("max_results")
+  status       JobStatus  @default(PENDING)
+  progress     Int        @default(0)
+  totalFound   Int        @default(0)   @map("total_found")
+  errorMessage String?    @map("error_message")
+  githubRunId  String?    @map("github_run_id")
+  githubRunUrl String?    @map("github_run_url")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt      @map("updated_at")
+  completedAt  DateTime?  @map("completed_at")
 
-  user_id       String?    @map("user_id")
-  user          User?      @relation(fields: [user_id], references: [id])
-  leads         Lead[]
-  logs          JobLog[]
+  userId       String?    @map("user_id")
+  user         User?      @relation(fields: [userId], references: [id])
+  leads        Lead[]
+  logs         JobLog[]
 
   @@map("scrape_jobs")
 }
 
 // ─────────────────────────────────────────────────────────────
-// JobLog — powers the real-time Terminal Stream
+// JobLog — real-time terminal stream
 // ─────────────────────────────────────────────────────────────
 
 model JobLog {
-  id         String     @id @default(cuid())
-  job_id     String     @map("job_id")
-  level      LogLevel   @default(INFO)
-  message    String
-  created_at DateTime   @default(now()) @map("created_at")
+  id        String     @id @default(cuid())
+  jobId     String     @map("job_id")
+  level     LogLevel   @default(INFO)
+  message   String
+  createdAt DateTime   @default(now()) @map("created_at")
 
-  job        ScrapeJob  @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  job       ScrapeJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@map("job_logs")
 }
@@ -169,15 +153,15 @@ model JobLog {
 // ─────────────────────────────────────────────────────────────
 
 model EnrichmentLog {
-  id         String   @id @default(cuid())
-  lead_id    String   @map("lead_id")
-  step       String
-  status     String
-  message    String?
-  data       Json?
-  created_at DateTime @default(now()) @map("created_at")
+  id        String   @id @default(cuid())
+  leadId    String   @map("lead_id")
+  step      String
+  status    String
+  message   String?
+  data      Json?
+  createdAt DateTime @default(now()) @map("created_at")
 
-  lead       Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("enrichment_logs")
 }
@@ -188,33 +172,32 @@ model EnrichmentLog {
 
 model TechDetection {
   id         String   @id @default(cuid())
-  lead_id    String   @map("lead_id")
+  leadId     String   @map("lead_id")
   technology String
   confidence String   @default("HIGH")
   evidence   String?
-  created_at DateTime @default(now()) @map("created_at")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  lead       Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("tech_detections")
 }
 
 // ─────────────────────────────────────────────────────────────
 // EmailVerification — Bouncify result (primary verifier)
+// Provider: "bouncify" | "myemailverifier"
 // ─────────────────────────────────────────────────────────────
 
 model EmailVerification {
-  id          String   @id @default(cuid())
-  lead_id     String   @unique @map("lead_id")
-  email       String
-  is_valid    Boolean? @map("is_valid")
-  // Bouncify: "deliverable" | "undeliverable" | "risky" | "unknown"
-  status      String?
-  // Provider: "bouncify" | "myemailverifier"
-  provider    String?
-  verified_at DateTime @default(now()) @map("verified_at")
+  id         String   @id @default(cuid())
+  leadId     String   @unique @map("lead_id")
+  email      String
+  isValid    Boolean? @map("is_valid")
+  status     String?
+  provider   String?
+  verifiedAt DateTime @default(now()) @map("verified_at")
 
-  lead        Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("email_verifications")
 }
