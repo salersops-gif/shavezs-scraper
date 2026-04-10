@@ -27,6 +27,9 @@ jobs:
       SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
+      # Direct Postgres URL — needed for schema grants (bypasses PostgREST)
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       # Enrichment APIs — from GitHub Secrets
       BOUNCIFY_API_KEY:   ${{ secrets.BOUNCIFY_API_KEY }}
       APOLLO_API_KEY:     ${{ secrets.APOLLO_API_KEY }}
@@ -69,6 +72,10 @@ jobs:
             echo "❌ ERROR: Supabase secrets are not configured."
             exit 1
           fi
+
+      # ── Fix Supabase permissions (survives schema resets) ─────────────────
+      - name: 🔐 Fix Supabase schema permissions
+        run: node scripts/fix-grants.js
 
       # ── Step 1: Google Maps Scraper ───────────────────────────────────────
       - name: 🗺️ Step 1 — Scrape Google Maps
