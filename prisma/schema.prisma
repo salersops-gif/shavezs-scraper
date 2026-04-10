@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["nativeTypes"]
 }
 
 datasource db {
@@ -20,9 +21,9 @@ enum EnrichmentStatus {
 }
 
 enum LeadQuality {
-  COLD  // 0–39
-  WARM  // 40–69
-  HOT   // 70–100
+  COLD
+  WARM
+  HOT
 }
 
 enum SourceType {
@@ -47,11 +48,11 @@ enum LogLevel {
 }
 
 // ─────────────────────────────────────────────────────────────
-// User — mirrors Supabase auth.users
+// User
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id         String      @id
+  id         String      @id @db.Uuid
   email      String      @unique
   createdAt  DateTime    @default(now()) @map("created_at")
   updatedAt  DateTime    @updatedAt      @map("updated_at")
@@ -63,13 +64,13 @@ model User {
 
 // ─────────────────────────────────────────────────────────────
 // Lead
-// Lead Score (0–100): +20 verified email, +15 phone, +10 whatsapp,
+// Lead Score: +20 verified email, +15 phone, +10 whatsapp,
 //   +10 keywords, +10 tech stack, +10 website, +5 maps, +5 address
 // Quality: COLD 0–39 | WARM 40–69 | HOT 70–100
 // ─────────────────────────────────────────────────────────────
 
 model Lead {
-  id               String           @id @default(cuid())
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   companyName      String           @map("company_name")
   website          String?
   email            String?
@@ -82,20 +83,20 @@ model Lead {
   keyword          String?
   metaDescription  String?          @map("meta_description")
   techStack        String[]         @map("tech_stack")
-  leadScore        Int              @default(0)       @map("lead_score")
-  leadQuality      LeadQuality      @default(COLD)    @map("lead_quality")
-  enrichmentStatus EnrichmentStatus @default(PENDING) @map("enrichment_status")
-  hasWhatsApp      Boolean          @default(false)   @map("has_whats_app")
-  hasEmail         Boolean          @default(false)   @map("has_email")
-  hasPhone         Boolean          @default(false)   @map("has_phone")
-  hasWebsite       Boolean          @default(false)   @map("has_website")
+  leadScore        Int              @default(0)           @map("lead_score")
+  leadQuality      LeadQuality      @default(COLD)        @map("lead_quality")
+  enrichmentStatus EnrichmentStatus @default(PENDING)     @map("enrichment_status")
+  hasWhatsApp      Boolean          @default(false)       @map("has_whats_app")
+  hasEmail         Boolean          @default(false)       @map("has_email")
+  hasPhone         Boolean          @default(false)       @map("has_phone")
+  hasWebsite       Boolean          @default(false)       @map("has_website")
   sourceType       SourceType       @default(GOOGLE_MAPS) @map("source_type")
   sourceUrl        String?          @map("source_url")
   notes            String?
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @updatedAt      @map("updated_at")
 
-  scrapeJobId      String?          @map("scrape_job_id")
+  scrapeJobId      String?          @map("scrape_job_id") @db.Uuid
   scrapeJob        ScrapeJob?       @relation(fields: [scrapeJobId], references: [id])
   enrichmentLogs   EnrichmentLog[]
   techDetections   TechDetection[]
@@ -109,7 +110,7 @@ model Lead {
 // ─────────────────────────────────────────────────────────────
 
 model ScrapeJob {
-  id           String     @id @default(cuid())
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   query        String
   niche        String
   location     String
@@ -124,7 +125,7 @@ model ScrapeJob {
   updatedAt    DateTime   @updatedAt      @map("updated_at")
   completedAt  DateTime?  @map("completed_at")
 
-  userId       String?    @map("user_id")
+  userId       String?    @map("user_id") @db.Uuid
   user         User?      @relation(fields: [userId], references: [id])
   leads        Lead[]
   logs         JobLog[]
@@ -137,8 +138,8 @@ model ScrapeJob {
 // ─────────────────────────────────────────────────────────────
 
 model JobLog {
-  id        String     @id @default(cuid())
-  jobId     String     @map("job_id")
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId     String     @map("job_id") @db.Uuid
   level     LogLevel   @default(INFO)
   message   String
   createdAt DateTime   @default(now()) @map("created_at")
@@ -153,8 +154,8 @@ model JobLog {
 // ─────────────────────────────────────────────────────────────
 
 model EnrichmentLog {
-  id        String   @id @default(cuid())
-  leadId    String   @map("lead_id")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId    String   @map("lead_id") @db.Uuid
   step      String
   status    String
   message   String?
@@ -171,8 +172,8 @@ model EnrichmentLog {
 // ─────────────────────────────────────────────────────────────
 
 model TechDetection {
-  id         String   @id @default(cuid())
-  leadId     String   @map("lead_id")
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId     String   @map("lead_id") @db.Uuid
   technology String
   confidence String   @default("HIGH")
   evidence   String?
@@ -184,13 +185,12 @@ model TechDetection {
 }
 
 // ─────────────────────────────────────────────────────────────
-// EmailVerification — Bouncify result (primary verifier)
-// Provider: "bouncify" | "myemailverifier"
+// EmailVerification
 // ─────────────────────────────────────────────────────────────
 
 model EmailVerification {
-  id         String   @id @default(cuid())
-  leadId     String   @unique @map("lead_id")
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId     String   @unique @map("lead_id") @db.Uuid
   email      String
   isValid    Boolean? @map("is_valid")
   status     String?
