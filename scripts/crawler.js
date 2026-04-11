@@ -280,9 +280,9 @@ async function main() {
     // Build update payload
     const update = {
       email:              crawlData.emails[0]       || lead.email       || null,
-      phone:              crawlData.phones[0]       || lead.phone       || null,
-      has_email:          crawlData.emails.length   > 0,
-      has_phone:          crawlData.phones.length   > 0,
+      phone:              lead.phone                || crawlData.phones[0] || null,
+      has_email:          crawlData.emails.length   > 0 || Boolean(lead.email),
+      has_phone:          crawlData.phones.length   > 0 || Boolean(lead.phone),
       has_whats_app:      crawlData.whatsappLinks.length > 0,
       tech_stack:         crawlData.techStack.map((t) => t.technology),
       meta_description:   crawlData.metaDescription,
