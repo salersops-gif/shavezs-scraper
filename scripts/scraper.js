@@ -81,6 +81,7 @@ async function insertLead(data) {
       has_website:       Boolean(data.website),
       has_phone:         Boolean(data.phone),
       tech_stack:        [],
+      updated_at:        new Date().toISOString(),
     })
     .select('id')
     .single()
