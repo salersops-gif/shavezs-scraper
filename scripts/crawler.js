@@ -36,6 +36,7 @@ const EMAIL_BLACKLIST = new Set([
   'example.com', 'sentry.io', 'w3.org', 'schema.org', 'google.com',
   'facebook.com', 'twitter.com', 'linkedin.com', 'amazonaws.com',
   'cloudflare.com', 'jquery.com', 'microsoft.com', 'apple.com',
+  'email.com', 'domain.com', 'test.com', 'yourdomain.com'
 ])
 
 // ─── Tech Stack Signatures ──────────────────────────────────────────────────
@@ -218,7 +219,8 @@ async function saveTechDetections(leadId, detections) {
     confidence: 'HIGH',
     evidence:   d.pattern,
   }))
-  const { error } = await supabase.from('tech_detections').upsert(rows, { onConflict: 'lead_id,technology' })
+  await supabase.from('tech_detections').delete().eq('lead_id', leadId)
+  const { error } = await supabase.from('tech_detections').insert(rows)
   if (error) logger.warn(`Tech detection save failed: ${error.message}`)
 }
 
