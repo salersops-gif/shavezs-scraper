@@ -173,8 +173,8 @@ async function webSearchFallback(companyName, location) {
   if (!companyName) return null
   const query = encodeURIComponent(`"${companyName}" ${location || ''} email`)
   try {
-    // DuckDuckGo HTML is fast and doesn't usually block simple scraper strings
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
+    // Yahoo Search is currently the most lenient engine for raw HTML fetch scraping
+    const res = await fetch(`https://search.yahoo.com/search?p=${query}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
       },
@@ -186,7 +186,11 @@ async function webSearchFallback(companyName, location) {
     const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
     const matches = html.match(EMAIL_RE) || []
 
-    const blacklist = new Set(['example.com', 'gmail.com', 'google.com', 'facebook.com', 'amazon.com', 'apple.com', 'sentry.io', 'w3.org'])
+    const blacklist = new Set([
+      'example.com', 'gmail.com', 'google.com', 'facebook.com', 
+      'amazon.com', 'apple.com', 'sentry.io', 'w3.org', 
+      'duckduckgo.com', 'yahoo.com', 'bing.com'
+    ])
     const valid = [...new Set(matches)].filter((e) => {
       const dom = e.split('@')[1]?.toLowerCase()
       // Skip common image extensions that get matched by regex
