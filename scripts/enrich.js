@@ -164,6 +164,44 @@ async function hunterSearch(domain) {
   }
 }
 
+// ─── Web Search Snippet Extract ─────────────────────────────────────────────
+/**
+ * As a final fallback, literally Google/DuckDuckGo the company name and extract
+ * emails from the search result descriptions (AI Overview / Snippets).
+ */
+async function webSearchFallback(companyName, location) {
+  if (!companyName) return null
+  const query = encodeURIComponent(`"${companyName}" ${location || ''} email`)
+  try {
+    // DuckDuckGo HTML is fast and doesn't usually block simple scraper strings
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+      },
+      signal: AbortSignal.timeout(10000)
+    })
+    if (!res.ok) return null
+
+    const html = await res.text()
+    const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+    const matches = html.match(EMAIL_RE) || []
+
+    const blacklist = new Set(['example.com', 'gmail.com', 'google.com', 'facebook.com', 'amazon.com', 'apple.com', 'sentry.io', 'w3.org'])
+    const valid = [...new Set(matches)].filter((e) => {
+      const dom = e.split('@')[1]?.toLowerCase()
+      // Skip common image extensions that get matched by regex
+      if (e.endsWith('.png') || e.endsWith('.jpg') || e.endsWith('.js')) return false
+      // Strict rule: don't grab weird random Google/Meta emails from the search footprint
+      return dom && !blacklist.has(dom) 
+    })
+
+    return valid[0] || null
+  } catch (err) {
+    logger.warn(`Web Search error: ${err.message}`)
+    return null
+  }
+}
+
 // ─── Domain extractor ───────────────────────────────────────────────────────
 function extractDomain(website) {
   if (!website) return null
@@ -292,7 +330,21 @@ async function main() {
       }
     }
 
-    // ── Step 5: Verify newly found email ──────────────────────────────────
+    // ── Step 5: Web Search Snippet Extract ────────────────────────────────
+    if (!email) {
+      logger.info(`  → Web Search: scanning snippets for ${lead.company_name}`)
+      const wsEmail = await webSearchFallback(lead.company_name, lead.city || lead.location)
+      if (wsEmail) {
+        email = wsEmail
+        await saveEnrichmentLog(lead.id, 'WEB_SEARCH', 'SUCCESS', `Found: ${wsEmail}`)
+        logger.success(`  ✅ Web Search found: ${wsEmail}`)
+        enriched = true
+      } else {
+        await saveEnrichmentLog(lead.id, 'WEB_SEARCH', 'FAILED', 'No email found')
+      }
+    }
+
+    // ── Step 6: Verify newly found email ──────────────────────────────────
     if (email && !verifyResult) {
       logger.info(`  → Bouncify: verifying API-sourced email ${email}`)
       verifyResult = await bouncifyVerify(email)
