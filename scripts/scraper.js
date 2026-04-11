@@ -54,14 +54,21 @@ async function setProgress(pct, found) {
 
 // ─── Insert one lead (skip duplicates) ─────────────────────────────────────
 async function insertLead(data) {
-  const { data: existing } = await supabase
+  const city = LOCATION.split(',')[0]?.trim() || null
+
+  let query = supabase
     .from('leads')
     .select('id')
     .eq('company_name', data.company_name)
-    .eq('scrape_job_id', JOB_ID)
-    .limit(1)
 
-  if (existing?.length) return existing[0]
+  if (city) query = query.eq('city', city)
+
+  const { data: existing } = await query.limit(1)
+
+  if (existing?.length) {
+    logger.info(`⏭️ Skipped (Already in DB): ${data.company_name}`)
+    return existing[0]
+  }
 
   const { data: inserted, error } = await supabase
     .from('leads')
