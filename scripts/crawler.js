@@ -136,8 +136,17 @@ async function crawlLead(page, lead) {
   if (!website) return result
 
   const baseUrl = website.startsWith('http') ? website : `https://${website}`
+  let rootUrl = baseUrl
+  try {
+    const u = new URL(baseUrl)
+    rootUrl = `${u.protocol}//${u.host}`
+  } catch {}
 
-  const pagesToCheck = [baseUrl, `${baseUrl}/contact`, `${baseUrl}/contact-us`]
+  const pagesToCheck = [...new Set([
+    baseUrl, // Deep link from maps
+    `${rootUrl}/contact`,
+    `${rootUrl}/contact-us`
+  ])]
 
   for (const url of pagesToCheck) {
     try {
