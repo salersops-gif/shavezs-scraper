@@ -71,6 +71,9 @@ async function insertLead(data) {
       phone:             data.phone      || null,
       address:           data.address    || null,
       location:          LOCATION,
+      city:              LOCATION.split(',')[0]?.trim() || null,
+      country:           LOCATION.split(',').length > 1 ? LOCATION.split(',').pop()?.trim() : null,
+      industry:          NICHE,
       keyword:           NICHE,
       source_type:       'GOOGLE_MAPS',
       source_url:        data.source_url || null,
@@ -121,7 +124,7 @@ async function extractPlaceDetails(page, url) {
     })
 
     const address = await page.$eval(
-      'button[data-item-id="address"] .fontBodyMedium, [data-item-id="address"] span',
+      'button[data-item-id="address"] .fontBodyMedium',
       el => el.innerText.trim()
     ).catch(() => null)
 

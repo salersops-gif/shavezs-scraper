@@ -58,7 +58,7 @@ export async function GET(request) {
       `"${l.website || ''}"`,
       `"${l.email || ''}"`,
       emailVerified,
-      `"${l.phone || ''}"`,
+      l.phone ? `="${l.phone}"` : '""',
       l.hasWhatsApp ? 'Yes' : 'No',
       `"${(l.address || '').replace(/"/g, '""')}"`,
       `"${l.city || ''}"`,
