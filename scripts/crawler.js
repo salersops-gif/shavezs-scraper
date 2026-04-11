@@ -36,7 +36,6 @@ const EMAIL_BLACKLIST = new Set([
   'example.com', 'sentry.io', 'w3.org', 'schema.org', 'google.com',
   'facebook.com', 'twitter.com', 'linkedin.com', 'amazonaws.com',
   'cloudflare.com', 'jquery.com', 'microsoft.com', 'apple.com',
-  'email.com', 'domain.com', 'test.com', 'yourdomain.com'
 ])
 
 // ─── Tech Stack Signatures ──────────────────────────────────────────────────
@@ -198,8 +197,8 @@ async function crawlLead(page, lead) {
       const phoneMatches = html.match(PHONE_RE) || []
       result.phones = cleanPhones([...result.phones, ...phoneMatches])
 
-      // If we found an email, skip remaining pages
-      if (result.emails.length > 0) break
+      // We removed the 'break' here so the crawler checks all /contact pages
+      // and gathers ALL emails (e.g., support@, info@) it finds across the site.
 
     } catch (err) {
       // Non-fatal — skip this URL and continue
@@ -219,7 +218,6 @@ async function saveTechDetections(leadId, detections) {
     confidence: 'HIGH',
     evidence:   d.pattern,
   }))
-  await supabase.from('tech_detections').delete().eq('lead_id', leadId)
   const { error } = await supabase.from('tech_detections').insert(rows)
   if (error) logger.warn(`Tech detection save failed: ${error.message}`)
 }
