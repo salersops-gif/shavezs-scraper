@@ -2,9 +2,6 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createClient } from '@/lib/supabase-server'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
-
 /**
  * GET /api/export
  * Exports leads as CSV. Same filter params as /api/leads.
@@ -84,9 +81,6 @@ export async function GET(request) {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
     },
   })
 }

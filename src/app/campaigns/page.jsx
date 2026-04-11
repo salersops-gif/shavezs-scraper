@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Briefcase, Plus, RefreshCw, Clock, CheckCircle, XCircle, Loader, Target } from 'lucide-react'
+import { Briefcase, Plus, RefreshCw, Clock, CheckCircle, XCircle, Loader, Target, Download } from 'lucide-react'
 import NewCampaignForm from '@/components/campaigns/NewCampaignForm'
 
 function JobStatusIcon({ status }) {
@@ -143,10 +143,23 @@ export default function CampaignsPage() {
                       </span>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '22px', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-primary)' }}>
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                    <div style={{ fontSize: '22px', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-primary)', lineHeight: 1 }}>
                       {job.progress || 0}%
                     </div>
+                    {((job._count?.leads || job.total_found || 0) > 0) && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.open(`/api/export?jobId=${job.id}`, '_blank')
+                        }}
+                        className="btn-secondary" 
+                        style={{ padding: '4px 8px', fontSize: '11px', height: 'auto', minHeight: 'auto' }}
+                      >
+                        <Download className="w-3 h-3" />
+                        Export
+                      </button>
+                    )}
                   </div>
                 </div>
 
